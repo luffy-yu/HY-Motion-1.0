@@ -91,11 +91,11 @@ class T2MRuntime:
             try:
                 from .smplh2woodfbx import SMPLH2WoodFBX
 
-                # Use lod1.fbx as the default template
+                # Use lod1_simplified.fbx as the default template (52 SMPL-H joints with zero rotations)
                 self.fbx_converter = SMPLH2WoodFBX(
-                    template_fbx_path="./assets/lod1.fbx"
+                    template_fbx_path="./assets/lod1_simplified.fbx"
                 )
-                self.current_fbx_converter_type = "lod1"
+                self.current_fbx_converter_type = "lod1_simplified"
             except Exception as e:
                 print(f">>> Failed to initialize FBX converter: {e}")
                 self.fbx_available = False

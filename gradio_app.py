@@ -50,7 +50,8 @@ NUM_WORKERS = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
 # Available FBX model templates
 FBX_MODEL_OPTIONS = {
-    "Lod1 Model": "./assets/lod1.fbx",
+    "Lod1 Model": "./assets/lod1_simplified.fbx",
+    "Lod1 Original (127 bones)": "./assets/lod1.fbx",
     "Wooden Model": "./assets/wooden_models/boy_Rigging_smplx_tex.fbx",
 }
 
