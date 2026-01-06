@@ -39,6 +39,60 @@ def find_mesh(name_hint=None):
     return None
 
 
+def find_all_meshes():
+    """Find all mesh objects in the scene (excluding default Cube)."""
+    meshes = []
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH' and obj.name != 'Cube':
+            meshes.append(obj)
+    return meshes
+
+
+def join_meshes(meshes, armature):
+    """Join multiple meshes into one, preserving armature modifiers."""
+    if len(meshes) == 0:
+        return None
+    if len(meshes) == 1:
+        return meshes[0]
+
+    print(f"\nJoining {len(meshes)} mesh objects...")
+    for m in meshes:
+        print(f"  - {m.name}: {len(m.data.vertices)} vertices")
+
+    # Deselect all
+    bpy.ops.object.select_all(action='DESELECT')
+
+    # Select all meshes
+    for mesh in meshes:
+        mesh.select_set(True)
+
+    # Set the first mesh as active (this will be the target for join)
+    bpy.context.view_layer.objects.active = meshes[0]
+
+    # Join all selected meshes
+    bpy.ops.object.join()
+
+    # The result is now in the active object
+    joined_mesh = bpy.context.active_object
+    joined_mesh.name = "body_joined"
+
+    print(f"Joined mesh: {joined_mesh.name} with {len(joined_mesh.data.vertices)} vertices")
+
+    # Ensure armature modifier is set up
+    has_armature_mod = False
+    for mod in joined_mesh.modifiers:
+        if mod.type == 'ARMATURE':
+            mod.object = armature
+            has_armature_mod = True
+            break
+
+    if not has_armature_mod:
+        mod = joined_mesh.modifiers.new(name="Armature", type='ARMATURE')
+        mod.object = armature
+
+    return joined_mesh
+
+
 def main():
     # Clear scene
     bpy.ops.object.select_all(action='SELECT')
@@ -70,17 +124,27 @@ def main():
     bpy.ops.import_scene.fbx(filepath=wooden_path)
 
     wooden_armature = find_armature()
-    wooden_mesh = find_mesh()
 
     if not wooden_armature:
         print("ERROR: No armature found in wooden model")
         return
-    if not wooden_mesh:
+
+    print(f"Armature: {wooden_armature.name}")
+
+    # Find all mesh parts and join them
+    all_meshes = find_all_meshes()
+    if not all_meshes:
         print("ERROR: No mesh found in wooden model")
         return
 
-    print(f"Armature: {wooden_armature.name}")
-    print(f"Mesh: {wooden_mesh.name}")
+    print(f"Found {len(all_meshes)} mesh objects")
+    wooden_mesh = join_meshes(all_meshes, wooden_armature)
+
+    if not wooden_mesh:
+        print("ERROR: Failed to join meshes")
+        return
+
+    print(f"Using joined mesh: {wooden_mesh.name}")
 
     # Print bone info to verify zero rotations
     print("\n=== Verifying skeleton (should have zero rotations) ===")
