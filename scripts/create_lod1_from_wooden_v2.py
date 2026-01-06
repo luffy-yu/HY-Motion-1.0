@@ -146,6 +146,46 @@ def main():
 
     print(f"Using joined mesh: {wooden_mesh.name}")
 
+    # Offset the model so feet are at ground level (Y=0)
+    print("\n=== Applying ground offset ===")
+    bpy.context.view_layer.objects.active = wooden_armature
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    # Find the lowest foot position (in cm, Blender uses cm for FBX imports)
+    l_foot = wooden_armature.data.edit_bones.get("L_Foot")
+    r_foot = wooden_armature.data.edit_bones.get("R_Foot")
+
+    foot_y_offset = 0
+    if l_foot and r_foot:
+        foot_y = min(l_foot.head.y, r_foot.head.y)
+        foot_y_offset = foot_y
+        print(f"  Foot Y position: {foot_y:.4f} cm")
+        print(f"  Applying offset: {-foot_y:.4f} cm")
+
+        # Move all bones up by the offset
+        for bone in wooden_armature.data.edit_bones:
+            bone.head.y -= foot_y
+            bone.tail.y -= foot_y
+
+        print(f"  New foot Y position: {min(l_foot.head.y, r_foot.head.y):.4f} cm")
+    else:
+        print("  Warning: Could not find L_Foot or R_Foot bones")
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Move mesh vertices to match the skeleton offset
+    if foot_y_offset != 0:
+        print(f"  Moving mesh vertices by Y offset: {-foot_y_offset:.4f} cm")
+        bpy.context.view_layer.objects.active = wooden_mesh
+        bpy.ops.object.mode_set(mode='EDIT')
+        import bmesh
+        bm = bmesh.from_edit_mesh(wooden_mesh.data)
+        for v in bm.verts:
+            v.co.y -= foot_y_offset
+        bmesh.update_edit_mesh(wooden_mesh.data)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        print("  Mesh vertices moved")
+
     # Print bone info to verify zero rotations
     print("\n=== Verifying skeleton (should have zero rotations) ===")
     bpy.context.view_layer.objects.active = wooden_armature

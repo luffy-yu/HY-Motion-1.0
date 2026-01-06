@@ -312,21 +312,49 @@ def _applyAnimationToSkeleton(fbxScene, nodes_map, rot_matrices, translations, f
         # Animate translation for root joint (Pelvis)
         if smplh_joint_idx == 0:
             root_node = node
-            # Add initial offset to translations (like smplh2woodfbx.py does: Translates[0] + trans)
-            # The translations input is relative displacement, we need to add the template's initial position
+            # The model's trans output represents pelvis world position relative to its training
+            # skeleton where pelvis is at ~43cm height (feet at ground).
+            #
+            # For templates with feet at ground (pelvis Y > 50cm like lod1_simplified.fbx):
+            #   - Template has pelvis at ~94cm, feet at ~0cm
+            #   - Model outputs pelvis at ~43cm (from training data)
+            #   - Offset = template_pelvis_Y - model_expected_pelvis_Y ≈ 94 - 43 = 51cm
+            #   - This keeps the feet at ground level
+            #
+            # For templates with pelvis near origin (old wooden model style):
+            #   - Template has pelvis at ~(-19cm), so just add the small offset
+            #
+            # The model's expected pelvis Y is calibrated so that feet touch ground.
+            # This was determined empirically by checking foot positions in exported FBX.
+            # Template pelvis Y (93.7cm) - this value = Y offset added to trans
+            MODEL_EXPECTED_PELVIS_Y_CM = 47.0  # Calibrated for feet at ground level
+
             if root_initial_translation is not None:
-                final_translations = translations + root_initial_translation
-                print(
-                    f"Applying root translation to '{fbx_node_name}', frames={num_frames}, "
-                    f"initial_offset={root_initial_translation}, "
-                    f"final translation range: {final_translations.min(axis=0)} to {final_translations.max(axis=0)}"
-                )
+                template_pelvis_y = root_initial_translation[1]
+                if template_pelvis_y > 50:
+                    # Template has feet at ground - add Y offset only
+                    y_offset = template_pelvis_y - MODEL_EXPECTED_PELVIS_Y_CM
+                    # Keep X and Z offsets from template (they're usually small)
+                    offset = np.array([root_initial_translation[0], y_offset, root_initial_translation[2]])
+                    final_translations = translations + offset
+                    print(
+                        f"Template has feet at ground (Pelvis Y={template_pelvis_y:.1f}cm), "
+                        f"adding offset (Y offset={y_offset:.1f}cm to account for skeleton difference)"
+                    )
+                else:
+                    # Template has pelvis near origin - add full offset
+                    final_translations = translations + root_initial_translation
+                    print(
+                        f"Template has pelvis near origin (Y={template_pelvis_y:.1f}cm), "
+                        f"adding full offset={root_initial_translation}"
+                    )
             else:
                 final_translations = translations
-                print(
-                    f"Applying root translation to '{fbx_node_name}', frames={num_frames}, "
-                    f"translation range: {final_translations.min(axis=0)} to {final_translations.max(axis=0)}"
-                )
+
+            print(
+                f"Applying root translation to '{fbx_node_name}', frames={num_frames}, "
+                f"translation range: {final_translations.min(axis=0)} to {final_translations.max(axis=0)}"
+            )
             _animateTranslationKeyFrames(
                 animLayer=animLayer,
                 node=node,
