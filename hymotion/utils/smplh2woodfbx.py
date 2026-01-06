@@ -7,7 +7,7 @@ from typing import Dict, Optional
 import fbx
 import numpy as np
 import torch
-from transforms3d.euler import mat2euler
+from scipy.spatial.transform import Rotation
 
 from .geometry import angle_axis_to_rotation_matrix, rot6d_to_rotation_matrix, rotation_matrix_to_angle_axis
 
@@ -89,6 +89,64 @@ SMPLH_TO_LOWERCASE_MAPPING = {
     "R_Thumb2": "right_thumb2",
     "R_Thumb3": "right_thumb3",
 }
+
+# Mapping from SMPL-H joint names to lod1.fbx joint names
+SMPLH_TO_LOD1_MAPPING = {
+    "Pelvis": "root",
+    "L_Hip": "l_upleg",
+    "R_Hip": "r_upleg",
+    "Spine1": "c_spine0",
+    "L_Knee": "l_lowleg",
+    "R_Knee": "r_lowleg",
+    "Spine2": "c_spine1",
+    "L_Ankle": "l_foot",
+    "R_Ankle": "r_foot",
+    "Spine3": "c_spine3",
+    "L_Foot": "l_ball",
+    "R_Foot": "r_ball",
+    "Neck": "c_neck",
+    "L_Collar": "l_clavicle",
+    "R_Collar": "r_clavicle",
+    "Head": "c_head",
+    "L_Shoulder": "l_uparm",
+    "R_Shoulder": "r_uparm",
+    "L_Elbow": "l_lowarm",
+    "R_Elbow": "r_lowarm",
+    "L_Wrist": "l_wrist",
+    "R_Wrist": "r_wrist",
+    # Left hand fingers
+    "L_Index1": "l_index1",
+    "L_Index2": "l_index2",
+    "L_Index3": "l_index3",
+    "L_Middle1": "l_middle1",
+    "L_Middle2": "l_middle2",
+    "L_Middle3": "l_middle3",
+    "L_Pinky1": "l_pinky1",
+    "L_Pinky2": "l_pinky2",
+    "L_Pinky3": "l_pinky3",
+    "L_Ring1": "l_ring1",
+    "L_Ring2": "l_ring2",
+    "L_Ring3": "l_ring3",
+    "L_Thumb1": "l_thumb1",
+    "L_Thumb2": "l_thumb2",
+    "L_Thumb3": "l_thumb3",
+    # Right hand fingers
+    "R_Index1": "r_index1",
+    "R_Index2": "r_index2",
+    "R_Index3": "r_index3",
+    "R_Middle1": "r_middle1",
+    "R_Middle2": "r_middle2",
+    "R_Middle3": "r_middle3",
+    "R_Pinky1": "r_pinky1",
+    "R_Pinky2": "r_pinky2",
+    "R_Pinky3": "r_pinky3",
+    "R_Ring1": "r_ring1",
+    "R_Ring2": "r_ring2",
+    "R_Ring3": "r_ring3",
+    "R_Thumb1": "r_thumb1",
+    "R_Thumb2": "r_thumb2",
+    "R_Thumb3": "r_thumb3",
+}
 # yapf: enable
 
 
@@ -154,11 +212,11 @@ def _animateSingleChannel(animLayer, component, name, values, frameDuration):
 
 def _animateRotationKeyFrames(animLayer, node, rot_matrices, frameDuration):
     """Animate rotation keyframes for a node using rotation matrices"""
-    rotations = []
-    for nth in range(len(rot_matrices)):
-        # Convert rotation matrix to Euler angles (XYZ order)
-        euler = np.rad2deg(mat2euler(rot_matrices[nth], axes="sxyz"))
-        rotations.append(euler)
+    # Convert all rotation matrices to Euler angles at once using scipy
+    rot_matrices = np.asarray(rot_matrices, dtype=np.float64)
+    r = Rotation.from_matrix(rot_matrices)
+    euler_angles = r.as_euler('xyz', degrees=True)  # Returns (N, 3) array
+    rotations = euler_angles.tolist()
 
     _animateSingleChannel(animLayer, node.LclRotation, "X", rotations, frameDuration)
     _animateSingleChannel(animLayer, node.LclRotation, "Y", rotations, frameDuration)
@@ -455,6 +513,9 @@ def _auto_detect_mapping(all_nodes):
         # Try lowercase version
         elif SMPLH_TO_LOWERCASE_MAPPING.get(smplh_name) in all_nodes:
             mapping[smplh_name] = SMPLH_TO_LOWERCASE_MAPPING[smplh_name]
+        # Try lod1 mapping
+        elif SMPLH_TO_LOD1_MAPPING.get(smplh_name) in all_nodes:
+            mapping[smplh_name] = SMPLH_TO_LOD1_MAPPING[smplh_name]
     return mapping
 
 
@@ -535,6 +596,9 @@ class SMPLH2WoodFBX:
             # Try lowercase version
             elif SMPLH_TO_LOWERCASE_MAPPING.get(smplh_name) in self.all_template_nodes:
                 mapping[smplh_name] = SMPLH_TO_LOWERCASE_MAPPING[smplh_name]
+            # Try lod1.fbx mapping
+            elif SMPLH_TO_LOD1_MAPPING.get(smplh_name) in self.all_template_nodes:
+                mapping[smplh_name] = SMPLH_TO_LOD1_MAPPING[smplh_name]
         return mapping
 
     def convert_npz_to_fbx(self, npz_file, outname, fps=30, clear_animations=True):

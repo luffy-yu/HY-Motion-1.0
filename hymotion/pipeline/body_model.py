@@ -218,11 +218,13 @@ def simple_lbs(v_template, rot_mats, joints, parents, skin_weights, skin_indices
 
 class WoodenMesh(torch.nn.Module):
     """
-    Wooden character mesh model that loads from binary files.
+    Character mesh model that loads from binary files.
     Uses simple LBS without shape blending (fixed skeleton).
+
+    Default model is lod1 (Meta Movement SDK High Fidelity model).
     """
 
-    def __init__(self, model_path="scripts/gradio/static/assets/dump_wooden"):
+    def __init__(self, model_path="scripts/gradio/static/assets/dump_lod1"):
         torch.nn.Module.__init__(self)
 
         # Load model data from .bin files
@@ -250,7 +252,7 @@ class WoodenMesh(torch.nn.Module):
         self.num_joints = model["num_joints"]
         self.num_verts = model["num_verts"]
 
-        print(f"[WoodenMesh] Loaded model: {self.num_verts} vertices, {self.num_joints} joints")
+        print(f"[Lod1Mesh] Loaded model: {self.num_verts} vertices, {self.num_joints} joints")
 
     def forward(self, params, fast_forward=False):
         """

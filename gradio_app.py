@@ -48,9 +48,16 @@ from hymotion.utils.t2m_runtime import T2MRuntime
 
 NUM_WORKERS = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
+# Available FBX model templates
+FBX_MODEL_OPTIONS = {
+    "Lod1 Model": "./assets/lod1.fbx",
+    "Wooden Model": "./assets/wooden_models/boy_Rigging_smplx_tex.fbx",
+}
+
 # Global runtime instance for Zero GPU lazy loading
 _global_runtime = None
 _global_args = None
+_global_fbx_template = None  # Track currently loaded FBX template
 
 
 def _init_runtime_if_needed():
@@ -99,12 +106,21 @@ def generate_motion_on_gpu(
     output_format: str,
     original_text: str,
     output_dir: str,
+    fbx_template_path: Optional[str] = None,
 ) -> Tuple[str, List[str]]:
     """
     GPU-decorated function for motion generation.
     This function will request GPU allocation on Hugging Face Zero GPU.
     """
     runtime = _init_runtime_if_needed()
+
+    # Update FBX converter template if specified and different from current
+    if fbx_template_path and runtime.fbx_available:
+        global _global_fbx_template
+        if _global_fbx_template != fbx_template_path:
+            print(f">>> Switching FBX template to: {fbx_template_path}")
+            runtime.set_fbx_converter("custom", fbx_template_path)
+            _global_fbx_template = fbx_template_path
 
     html_content, fbx_files, _ = runtime.generate_motion(
         text=text,
@@ -486,6 +502,7 @@ class T2MGradioUI:
         seed_input: str,
         duration: float,
         cfg_scale: float,
+        fbx_model_name: str = "Wooden Model",
     ) -> Tuple[str, List[str]]:
         # When rewrite is not available, use original_text directly
         if not self.prompt_engineering_available:
@@ -503,6 +520,9 @@ class T2MGradioUI:
             fbx_ok = getattr(runtime, "fbx_available", False)
             req_format = "fbx" if fbx_ok else "dict"
 
+            # Get the FBX template path from the model name
+            fbx_template_path = FBX_MODEL_OPTIONS.get(fbx_model_name, FBX_MODEL_OPTIONS["Lod1 Model"])
+
             # Use GPU-decorated function for Zero GPU support
             html_content, fbx_files = generate_motion_on_gpu(
                 text=text_to_use,
@@ -512,6 +532,7 @@ class T2MGradioUI:
                 output_format=req_format,
                 original_text=original_text,
                 output_dir=self.args.output_dir,
+                fbx_template_path=fbx_template_path,
             )
             # Escape HTML content for srcdoc attribute
             escaped_html = html_content.replace('"', "&quot;")
@@ -731,6 +752,19 @@ class T2MGradioUI:
                 info="Text fidelity: higher = more faithful to the prompt",
             )
 
+        # FBX Model selection (only show if FBX is available)
+        if getattr(self.runtime, "fbx_available", False):
+            with gr.Group():
+                gr.Markdown("### 🎭 FBX Model Template")
+                self.fbx_model_dropdown = gr.Dropdown(
+                    choices=list(FBX_MODEL_OPTIONS.keys()),
+                    value="Lod1 Model",
+                    label="Select FBX Model",
+                    info="Choose the character model for FBX export",
+                )
+        else:
+            self.fbx_model_dropdown = gr.State("Lod1 Model")
+
     def _bind_events(self):
         # Generate random seeds
         self.dice_btn.click(self._generate_random_seeds, outputs=[self.seed_input])
@@ -773,19 +807,20 @@ class T2MGradioUI:
                 self.seed_input,
                 self.duration_slider,
                 self.cfg_slider,
+                self.fbx_model_dropdown,
             ],
             outputs=[self.output_display, self.fbx_files],
             concurrency_limit=NUM_WORKERS,
         ).then(
-            fn=lambda fbx_list: (
+            fn=lambda fbx_list, fbx_model: (
                 (
-                    "🎉 Motion generation completed! You can view the motion visualization result on the right. FBX files are ready for download."
+                    f"🎉 Motion generation completed! FBX files use '{fbx_model}' - ready for download."
                     if fbx_list
                     else "🎉 Motion generation completed! You can view the motion visualization result on the right"
                 ),
                 gr.update(visible=bool(fbx_list)),
             ),
-            inputs=[self.fbx_files],
+            inputs=[self.fbx_files, self.fbx_model_dropdown],
             outputs=[self.status_output, self.fbx_download_row],
         )
 
@@ -908,6 +943,7 @@ def create_demo(final_model_path):
 
 if __name__ == "__main__":
     # Create demo at module level for Hugging Face Spaces
-    final_model_path = try_to_download_model()
+    # final_model_path = try_to_download_model()
+    final_model_path = './ckpts/tencent/HY-Motion-1.0/HY-Motion-1.0-Lite'
     demo = create_demo(final_model_path)
-    demo.launch()
+    demo.launch(server_name="192.168.0.20", server_port=7860, share=False)

@@ -382,8 +382,8 @@ def generate_static_html_content(
     # Convert SMPL data to JSON
     smpl_data_json = json.dumps(smpl_frames, ensure_ascii=False)
 
-    # Load template
-    template_path = os.path.join(_TEMPLATE_DIR, "index_wooden_static.html")
+    # Load template (using lod1 model with embedded mesh data)
+    template_path = os.path.join(_TEMPLATE_DIR, "index_lod1_static.html")
     with open(template_path, "r", encoding="utf-8") as f:
         template_content = f.read()
 

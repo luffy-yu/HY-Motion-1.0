@@ -86,11 +86,16 @@ class T2MRuntime:
             print(">>> [WARNING] Checkpoint not found, will use randomly initialized model weights")
         self.load()
         self.fbx_available = FBX_AVAILABLE
+        self.current_fbx_converter_type = None
         if self.fbx_available:
             try:
                 from .smplh2woodfbx import SMPLH2WoodFBX
 
-                self.fbx_converter = SMPLH2WoodFBX()
+                # Use lod1.fbx as the default template
+                self.fbx_converter = SMPLH2WoodFBX(
+                    template_fbx_path="./assets/lod1.fbx"
+                )
+                self.current_fbx_converter_type = "lod1"
             except Exception as e:
                 print(f">>> Failed to initialize FBX converter: {e}")
                 self.fbx_available = False
@@ -106,6 +111,34 @@ class T2MRuntime:
             )
         else:
             print(f">>> T2MRuntime loaded in IP {self.local_ip}, devices={device_info}")
+
+    def set_fbx_converter(self, converter_type: str, template_path: Optional[str] = None):
+        """
+        Set the FBX converter with a template.
+
+        Args:
+            converter_type: Converter type name (for logging)
+            template_path: Path to the FBX template file
+        """
+        if not self.fbx_available:
+            print(">>> FBX module not available, cannot set converter")
+            return
+
+        if converter_type == self.current_fbx_converter_type and template_path is None:
+            print(f">>> FBX converter already set to: {converter_type}")
+            return
+
+        try:
+            from .smplh2woodfbx import SMPLH2WoodFBX
+
+            if template_path:
+                self.fbx_converter = SMPLH2WoodFBX(template_fbx_path=template_path)
+            else:
+                self.fbx_converter = SMPLH2WoodFBX()
+            self.current_fbx_converter_type = converter_type
+            print(f">>> Switched FBX converter to: {converter_type}")
+        except Exception as e:
+            print(f">>> Failed to switch FBX converter: {e}")
 
     def load(self):
         if self._loaded:
