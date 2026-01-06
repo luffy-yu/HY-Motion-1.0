@@ -208,6 +208,114 @@ def transfer_vertex_weights(mesh_obj, from_group, to_group):
     mesh_obj.vertex_groups.remove(from_vg)
 
 
+def rebuild_armature_with_zero_rotations():
+    """
+    Rebuild the armature from scratch with zero local rotations.
+
+    This creates a new armature where:
+    1. Bone world positions are the same as the original
+    2. All local rotations are zero (bones point along their local Y axis)
+    3. The mesh skinning is transferred to the new armature
+
+    This is necessary because the FBX importer creates bones with pre-rotations,
+    and Blender's FBX exporter preserves these. The only way to get zero
+    local rotations in the exported FBX is to create bones from scratch.
+    """
+    from mathutils import Vector, Matrix
+    import math
+
+    old_armature = find_armature()
+    mesh = find_mesh()
+
+    if not old_armature:
+        print("No armature found")
+        return False
+
+    print("\nRebuilding armature with zero local rotations...")
+
+    # Step 1: Collect world-space bone positions from the old armature
+    bpy.context.view_layer.objects.active = old_armature
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    bone_data = {}
+    parent_map = {}
+
+    for bone in old_armature.data.edit_bones:
+        bone_data[bone.name] = {
+            'head': bone.head.copy(),
+            'tail': bone.tail.copy(),
+        }
+        if bone.parent:
+            parent_map[bone.name] = bone.parent.name
+        else:
+            parent_map[bone.name] = None
+        print(f"  Collected: {bone.name}")
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Step 2: Create a new armature
+    new_armature_data = bpy.data.armatures.new("lod1_armature")
+    new_armature = bpy.data.objects.new("lod1_armature", new_armature_data)
+    bpy.context.collection.objects.link(new_armature)
+
+    bpy.context.view_layer.objects.active = new_armature
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    # Step 3: Create bones with the same positions
+    new_bones = {}
+    for bone_name, data in bone_data.items():
+        bone = new_armature_data.edit_bones.new(bone_name)
+        bone.head = data['head']
+        bone.tail = data['tail']
+        new_bones[bone_name] = bone
+        print(f"  Created: {bone_name}")
+
+    # Step 4: Set up parent relationships FIRST (before adjusting roll)
+    for bone_name, parent_name in parent_map.items():
+        if parent_name and parent_name in new_bones:
+            new_bones[bone_name].parent = new_bones[parent_name]
+
+    # Step 5: Calculate and set bone rolls to achieve zero local rotation
+    # For FBX, a bone with zero local rotation has:
+    # - Local Y axis along bone direction (head to tail)
+    # - Local Z axis pointing "up" (based on parent's orientation)
+    for bone_name, bone in new_bones.items():
+        # Get bone direction
+        direction = (bone.tail - bone.head).normalized()
+
+        # Calculate roll to align local Z with world Z (projected onto the bone's plane)
+        # This is what gives zero rotation in FBX for most bones
+        if abs(direction.z) < 0.99:
+            # Use world Z as the "up" vector
+            bone.align_roll(Vector((0, 0, 1)))
+        else:
+            # Bone is nearly vertical, use world Y as the "up" vector
+            bone.align_roll(Vector((0, 1, 0)))
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Step 6: Transfer mesh to new armature
+    if mesh:
+        # Remove old armature modifier
+        for mod in mesh.modifiers:
+            if mod.type == 'ARMATURE' and mod.object == old_armature:
+                mesh.modifiers.remove(mod)
+                break
+
+        # Add new armature modifier
+        mod = mesh.modifiers.new(name="Armature", type='ARMATURE')
+        mod.object = new_armature
+
+        # Parent mesh to new armature
+        mesh.parent = new_armature
+
+    # Step 7: Delete old armature
+    bpy.data.objects.remove(old_armature, do_unlink=True)
+
+    print("Armature rebuilt with aligned bone rolls")
+    return True
+
+
 def simplify_skeleton():
     """Main function to simplify the skeleton."""
 
@@ -326,6 +434,12 @@ def main():
         print("Failed to simplify skeleton!")
         return
 
+    # Rebuild armature with zero local rotations
+    # The FBX importer creates bones with pre-rotations, and Blender's FBX exporter
+    # preserves these. The only way to get zero local rotations is to rebuild the armature.
+    if not rebuild_armature_with_zero_rotations():
+        print("Warning: Failed to rebuild armature")
+
     # Export to same directory as input
     project_root = os.path.dirname(os.path.dirname(input_path))
     output_path = os.path.join(project_root, "assets", "lod1_simplified.fbx")
@@ -350,7 +464,7 @@ def main():
         filepath=output_path,
         use_selection=True,
         apply_scale_options='FBX_SCALE_NONE',  # Keep original scale
-        bake_space_transform=False,  # Don't bake transforms
+        bake_space_transform=True,  # Bake transforms to remove pre-rotations
         object_types={'ARMATURE', 'MESH'},
         use_mesh_modifiers=True,
         mesh_smooth_type='FACE',
@@ -359,6 +473,7 @@ def main():
         secondary_bone_axis='X',
         axis_forward='-Z',
         axis_up='Y',
+        use_armature_deform_only=True,  # Only export deform bones
     )
 
     print("\nDone! Simplified FBX saved to: assets/lod1_simplified.fbx")

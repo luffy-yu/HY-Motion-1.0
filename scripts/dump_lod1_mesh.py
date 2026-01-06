@@ -509,6 +509,17 @@ def dump_mesh_data(output_dir, vertices, faces, uvs, skin_weights, skin_indices,
     print(f"  Kintree: {len(kintree)}")
 
 
+def load_wooden_joint_template(wooden_dump_dir):
+    """Load the T-pose joint template from the wooden model dump."""
+    j_template_path = os.path.join(wooden_dump_dir, "j_template.bin")
+    if not os.path.exists(j_template_path):
+        raise FileNotFoundError(f"Wooden j_template.bin not found at: {j_template_path}")
+
+    j_template = np.frombuffer(open(j_template_path, "rb").read(), dtype=np.float32)
+    j_template = j_template.reshape(-1, 3)
+    return j_template
+
+
 def main():
     parser = argparse.ArgumentParser(description="Dump lod1.fbx mesh data to binary format")
     parser.add_argument(
@@ -522,6 +533,18 @@ def main():
         type=str,
         default="./scripts/gradio/static/assets/dump_mhr",
         help="Output directory for binary files"
+    )
+    parser.add_argument(
+        "--use-wooden-joints", "-w",
+        action="store_true",
+        default=True,
+        help="Use wooden model T-pose joint positions instead of extracting from input FBX (default: True)"
+    )
+    parser.add_argument(
+        "--wooden-dump-dir",
+        type=str,
+        default="./scripts/gradio/static/assets/dump_wooden",
+        help="Path to wooden model dump directory (for T-pose joint positions)"
     )
     args = parser.parse_args()
 
@@ -566,9 +589,14 @@ def main():
         print("Extracting skin data...")
         skin_weights, skin_indices = extract_skin_data(mesh_node, skeleton_nodes, SMPLH_JOINT_ORDER, joint_mapping)
 
-        # Extract joint positions
-        print("Extracting joint positions...")
-        j_template = extract_joint_positions(skeleton_nodes, SMPLH_JOINT_ORDER, joint_mapping)
+        # Extract or load joint positions
+        if args.use_wooden_joints:
+            print(f"Loading T-pose joint positions from wooden model: {args.wooden_dump_dir}")
+            j_template = load_wooden_joint_template(args.wooden_dump_dir)
+            print(f"  Loaded {j_template.shape[0]} joints from wooden model")
+        else:
+            print("Extracting joint positions from input FBX...")
+            j_template = extract_joint_positions(skeleton_nodes, SMPLH_JOINT_ORDER, joint_mapping)
 
         # Save data
         dump_mesh_data(
