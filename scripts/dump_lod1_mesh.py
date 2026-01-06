@@ -592,11 +592,24 @@ def main():
         # Extract or load joint positions
         if args.use_wooden_joints:
             print(f"Loading T-pose joint positions from wooden model: {args.wooden_dump_dir}")
-            j_template = load_wooden_joint_template(args.wooden_dump_dir)
+            j_template = load_wooden_joint_template(args.wooden_dump_dir).copy()  # Make writable copy
             print(f"  Loaded {j_template.shape[0]} joints from wooden model")
         else:
             print("Extracting joint positions from input FBX...")
             j_template = extract_joint_positions(skeleton_nodes, SMPLH_JOINT_ORDER, joint_mapping)
+
+        # Offset vertices and joints so feet are at ground level (Y=0)
+        # Find the lowest foot joint Y position
+        l_foot_idx = SMPLH_JOINT_ORDER.index("L_Foot")
+        r_foot_idx = SMPLH_JOINT_ORDER.index("R_Foot")
+        foot_y = min(j_template[l_foot_idx, 1], j_template[r_foot_idx, 1])
+
+        print(f"\nApplying ground offset: {-foot_y:.4f} (feet were at Y={foot_y:.4f})")
+        vertices[:, 1] -= foot_y
+        j_template[:, 1] -= foot_y
+
+        print(f"  New vertex Y range: {vertices[:,1].min():.4f} to {vertices[:,1].max():.4f}")
+        print(f"  New joint Y range: {j_template[:,1].min():.4f} to {j_template[:,1].max():.4f}")
 
         # Save data
         dump_mesh_data(
