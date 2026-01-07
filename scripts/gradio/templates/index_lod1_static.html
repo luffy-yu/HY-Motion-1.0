@@ -478,6 +478,10 @@
         rootBone.name = jointNames[0] || 'Pelvis';
         var bones = [rootBone];
 
+        // Store the template's pelvis Y position (for reference/debugging)
+        templatePelvisY = keypoints[1];
+        console.log('Template pelvis Y: ' + templatePelvisY.toFixed(4) + 'm, MODEL_EXPECTED_PELVIS_Y: ' + MODEL_EXPECTED_PELVIS_Y.toFixed(4) + 'm');
+
         for (let i = 1; i < numJoints; i++) {
             const bone = new THREE.Bone();
             const parentIndex = edges[i];
@@ -537,6 +541,13 @@
     const baseIntervalTime = 30;
     var model_mesh = {};
 
+    // Y offset to align feet with ground plane
+    // The model outputs pelvis at ~47cm (training data convention where feet are at ground).
+    // The template has pelvis at a different height, so we need to compensate.
+    // This is the same offset calculation used in smplh2woodfbx.py for FBX export.
+    const MODEL_EXPECTED_PELVIS_Y = 0.47; // 47cm in meters
+    let templatePelvisY = 0.937; // Default for lod1_simplified.fbx (~93.7cm)
+
     let isPlaying = false;
     let lastFrameTime = 0;
     let playbackSpeed = 1.0;
@@ -574,9 +585,14 @@
             if (ignoreGlobalTrans) {
                 meshContainer.position.set(-offsets[b], 0, 0);
             } else {
+                // The model's trans.Y represents pelvis world position where feet are at ground
+                // when trans.Y ≈ MODEL_EXPECTED_PELVIS_Y (0.47m).
+                // The mesh has feet at local Y=0, so we offset by subtracting MODEL_EXPECTED_PELVIS_Y
+                // to ensure feet touch ground when the model says they should.
+                // This matches the FBX export logic in smplh2woodfbx.py.
                 meshContainer.position.set(
                     smpl_params.Th[0][0] - offsets[b],
-                    smpl_params.Th[0][1],
+                    smpl_params.Th[0][1] - MODEL_EXPECTED_PELVIS_Y,
                     smpl_params.Th[0][2]
                 );
             }
