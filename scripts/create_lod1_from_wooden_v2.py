@@ -148,10 +148,28 @@ def adjust_upper_body_to_lod1(armature, mesh):
     # For skeleton adjustments, we move bones and their children
 
     # Store original positions for reference
+    # Include all bones that will move (including finger bones as children of wrist)
     bones_to_adjust = {}
-    for bone_name in ["Spine3", "Neck", "Head", "L_Collar", "R_Collar",
-                      "L_Shoulder", "R_Shoulder", "L_Elbow", "R_Elbow",
-                      "L_Wrist", "R_Wrist"]:
+    bones_to_track = [
+        "Spine3", "Neck", "Head",
+        "L_Collar", "R_Collar",
+        "L_Shoulder", "R_Shoulder",
+        "L_Elbow", "R_Elbow",
+        "L_Wrist", "R_Wrist",
+        # Left hand fingers
+        "L_Index1", "L_Index2", "L_Index3",
+        "L_Middle1", "L_Middle2", "L_Middle3",
+        "L_Ring1", "L_Ring2", "L_Ring3",
+        "L_Pinky1", "L_Pinky2", "L_Pinky3",
+        "L_Thumb1", "L_Thumb2", "L_Thumb3",
+        # Right hand fingers
+        "R_Index1", "R_Index2", "R_Index3",
+        "R_Middle1", "R_Middle2", "R_Middle3",
+        "R_Ring1", "R_Ring2", "R_Ring3",
+        "R_Pinky1", "R_Pinky2", "R_Pinky3",
+        "R_Thumb1", "R_Thumb2", "R_Thumb3",
+    ]
+    for bone_name in bones_to_track:
         bone = armature.data.edit_bones.get(bone_name)
         if bone:
             bones_to_adjust[bone_name] = {
