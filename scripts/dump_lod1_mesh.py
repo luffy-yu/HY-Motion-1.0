@@ -537,8 +537,8 @@ def main():
     parser.add_argument(
         "--use-wooden-joints", "-w",
         action="store_true",
-        default=True,
-        help="Use wooden model T-pose joint positions instead of extracting from input FBX (default: True)"
+        default=False,
+        help="Use wooden model T-pose joint positions instead of extracting from input FBX"
     )
     parser.add_argument(
         "--wooden-dump-dir",
