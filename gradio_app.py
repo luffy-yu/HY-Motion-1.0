@@ -50,14 +50,14 @@ NUM_WORKERS = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
 # Available FBX model templates
 FBX_MODEL_OPTIONS = {
-    "Lod1 Model": "./assets/lod1_simplified.fbx",
-    "Lod1 Original (127 bones)": "./assets/lod1.fbx",
-    "Wooden Model": "./assets/wooden_models/boy_Rigging_smplx_tex.fbx",
+    "Wooden Model": "./assets/lod1_simplified.fbx",
+    "SMPLX Model": "./MHR/assets/lod1.fbx",
+    "Meta Movement Avatar Model": "./assets/meta_movementsdk_models/high_fidelity_rig.fbx",
 }
 
-# Neck offset in cm to match High Fidelity rig proportions
-# LOD1 Spine3-to-Neck = 9.36cm, HF Chest-to-Neck = 12.10cm, difference = 2.74cm
-HF_NECK_OFFSET_CM = 2.74
+# Models that require simple_convert.py post-processing
+MODELS_REQUIRING_CONVERSION = {"SMPLX Model", "Meta Movement Avatar Model"}
+
 
 # Global runtime instance for Zero GPU lazy loading
 _global_runtime = None
@@ -511,17 +511,17 @@ class T2MGradioUI:
         duration: float,
         cfg_scale: float,
         fbx_model_name: str = "Wooden Model",
-        hf_neck_offset: bool = False,
-    ) -> Tuple[str, List[str]]:
+        enable_visualization: bool = False,
+    ) -> Tuple[str, List[str], List[str]]:
         # When rewrite is not available, use original_text directly
         if not self.prompt_engineering_available:
             text_to_use = original_text.strip()
             if not text_to_use:
-                return "Error: Input text is empty, please enter text first", []
+                return "Error: Input text is empty, please enter text first", [], []
         else:
             text_to_use = rewritten_text.strip()
             if not text_to_use:
-                return "Error: Rewritten text is empty, please rewrite the text first", []
+                return "Error: Rewritten text is empty, please rewrite the text first", [], []
 
         try:
             # Use runtime from global if available (for Zero GPU), otherwise use self.runtime
@@ -530,10 +530,11 @@ class T2MGradioUI:
             req_format = "fbx" if fbx_ok else "dict"
 
             # Get the FBX template path from the model name
-            fbx_template_path = FBX_MODEL_OPTIONS.get(fbx_model_name, FBX_MODEL_OPTIONS["Lod1 Model"])
+            
+            generation_template_path = FBX_MODEL_OPTIONS.get("Wooden Model")
 
-            # Calculate neck offset based on checkbox
-            neck_offset_cm = HF_NECK_OFFSET_CM if hf_neck_offset else 0.0
+            # No neck offset for the new workflow
+            neck_offset_cm = 0.0
 
             # Use GPU-decorated function for Zero GPU support
             html_content, fbx_files = generate_motion_on_gpu(
@@ -544,9 +545,19 @@ class T2MGradioUI:
                 output_format=req_format,
                 original_text=original_text,
                 output_dir=self.args.output_dir,
-                fbx_template_path=fbx_template_path,
+                fbx_template_path=generation_template_path,
                 neck_offset_cm=neck_offset_cm,
             )
+
+            # Track HTML visualization files
+            html_files = []
+
+            # If SMPLX or Meta Movement Avatar Model selected, run simple_convert.py
+            if fbx_model_name in MODELS_REQUIRING_CONVERSION and fbx_files:
+                html_files = self._run_conversion_pipeline(
+                    fbx_files, fbx_model_name, enable_visualization
+                )
+
             # Escape HTML content for srcdoc attribute
             escaped_html = html_content.replace('"', "&quot;")
             # Return iframe with srcdoc - directly embed HTML content
@@ -558,13 +569,182 @@ class T2MGradioUI:
                     style="border: none; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);"
                 ></iframe>
             """
-            return iframe_html, fbx_files
+            return iframe_html, fbx_files, html_files
         except Exception as e:
             print(f"\t>>> Motion generation failed: {e}")
             return (
                 f"❌ Motion generation failed: {str(e)}\n\nPlease check the input parameters or try again later",
                 [],
+                [],
             )
+
+    def _run_conversion_pipeline(
+        self,
+        fbx_files: List[str],
+        fbx_model_name: str,
+        enable_visualization: bool,
+    ) -> List[str]:
+        """
+        Run simple_convert.py for SMPLX/Meta Movement Avatar models.
+
+        Args:
+            fbx_files: List of generated FBX file paths
+            fbx_model_name: Name of the selected model template
+            enable_visualization: Whether to generate HTML visualization
+
+        Returns:
+            List of generated HTML visualization file paths
+        """
+        import subprocess
+
+        html_files = []
+        
+        # Determine the FBX template path based on model name
+        if fbx_model_name == "SMPLX Model" or fbx_model_name == "Meta Movement Avatar Model":
+            fbx_template = os.path.abspath(FBX_MODEL_OPTIONS.get(fbx_model_name))
+        else:
+            return html_files
+
+        # Path to simple_convert.py and pixi environment
+        mhr_tools_dir = os.path.abspath("./MHR/tools/mhr_smpl_conversion")
+        simple_convert_script = os.path.join(mhr_tools_dir, "simple_convert.py")
+        visualize_script = os.path.join(mhr_tools_dir, "visualize_output.py")
+        pixi_python = os.path.abspath("./MHR/.pixi/envs/default/bin/python")
+
+        for fbx_file in fbx_files:
+            # Skip non-FBX files
+            if not fbx_file.endswith('.fbx'):
+                continue
+
+            fbx_basename = os.path.splitext(os.path.basename(fbx_file))[0]
+            output_dir = os.path.join(os.path.dirname(fbx_file), f"converted_{fbx_basename}")
+
+            print(f">>> Running simple_convert.py for {fbx_file}")
+            print(f">>> FBX template: {fbx_template}")
+            print(f">>> Output dir: {output_dir}")
+
+            # Run simple_convert.py
+            cmd = [
+                pixi_python,
+                simple_convert_script,
+                "--smplx", os.path.abspath(fbx_file),
+                "--fbx-template", fbx_template,
+                "-o", output_dir,
+            ]
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=mhr_tools_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 minute timeout
+                )
+                if result.returncode != 0:
+                    print(f">>> simple_convert.py failed: {result.stderr}")
+                    continue
+                print(f">>> simple_convert.py output: {result.stdout}")
+            except subprocess.TimeoutExpired:
+                print(f">>> simple_convert.py timed out for {fbx_file}")
+                continue
+            except Exception as e:
+                print(f">>> simple_convert.py error: {e}")
+                continue
+
+            # Run visualize_output.py if enabled
+            if enable_visualization:
+                html_output_path = os.path.join(
+                    os.path.dirname(fbx_file),
+                    f"{fbx_basename}.html"
+                )
+
+                print(f">>> Running visualize_output.py for {output_dir}")
+                viz_cmd = [
+                    pixi_python,
+                    visualize_script,
+                    "--output_dir", output_dir,
+                    "--save_html", html_output_path,
+                ]
+
+                try:
+                    result = subprocess.run(
+                        viz_cmd,
+                        cwd=mhr_tools_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,  # 2 minute timeout
+                    )
+                    if result.returncode != 0:
+                        print(f">>> visualize_output.py failed: {result.stderr}")
+                    else:
+                        print(f">>> visualize_output.py output: {result.stdout}")
+                        # Find the generated HTML file (may have subdir name appended)
+                        html_dir = os.path.dirname(html_output_path)
+                        html_base = os.path.splitext(os.path.basename(html_output_path))[0]
+                        for f in os.listdir(html_dir):
+                            if f.startswith(html_base) and f.endswith('.html'):
+                                html_files.append(os.path.join(html_dir, f))
+                except subprocess.TimeoutExpired:
+                    print(f">>> visualize_output.py timed out")
+                except Exception as e:
+                    print(f">>> visualize_output.py error: {e}")
+
+        return html_files
+
+    def _update_download_panel(
+        self,
+        fbx_files: List[str],
+        html_files: List[str],
+        fbx_model_name: str,
+    ):
+        """
+        Update the download panel with FBX files and HTML visualization links.
+
+        Args:
+            fbx_files: List of FBX file paths
+            html_files: List of HTML visualization file paths
+            fbx_model_name: Name of the selected model
+
+        Returns:
+            Tuple of (status_message, download_row_visibility, html_links_html, filtered_fbx_files)
+        """
+        # Filter to only include FBX files (remove txt files)
+        fbx_only = [f for f in fbx_files if f.endswith('.fbx')] if fbx_files else []
+
+        # Build status message
+        if fbx_only:
+            status_msg = f"🎉 Motion generation completed! FBX files use '{fbx_model_name}' - ready for download."
+            if html_files:
+                status_msg += f" {len(html_files)} visualization(s) generated."
+        else:
+            status_msg = "🎉 Motion generation completed! You can view the motion visualization result on the right"
+
+        # Build HTML links for visualization files
+        html_links_content = ""
+        if html_files:
+            links = []
+            for html_file in html_files:
+                filename = os.path.basename(html_file)
+                # Create a link that opens in a new tab
+                # Note: Gradio serves files from the output directory
+                links.append(
+                    f'<a href="file={html_file}" target="_blank" '
+                    f'style="color: #667eea; text-decoration: none; margin-right: 10px;">'
+                    f'🌐 {filename}</a>'
+                )
+            html_links_content = f'''
+                <div style="padding: 10px; background: #f8f9fa; border-radius: 8px; margin-top: 10px;">
+                    <strong>Visualization Files:</strong><br>
+                    {"<br>".join(links)}
+                </div>
+            '''
+
+        return (
+            status_msg,
+            gr.update(visible=bool(fbx_only)),
+            gr.update(value=html_links_content, visible=bool(html_files)),
+            fbx_only,  # Return filtered FBX files
+        )
 
     def _get_example_choices(self):
         """Get all example choices from all data sources"""
@@ -679,13 +859,24 @@ class T2MGradioUI:
                     # FBX Download section
                     with gr.Row(visible=False) as self.fbx_download_row:
                         if getattr(self.runtime, "fbx_available", False):
-                            self.fbx_files = gr.File(
-                                label="📦 Download FBX Files",
-                                file_count="multiple",
-                                interactive=False,
-                            )
+                            with gr.Column():
+                                self.fbx_files = gr.File(
+                                    label="📦 Download FBX Files",
+                                    file_count="multiple",
+                                    interactive=False,
+                                )
+                                # HTML visualization links (visible when SMPLX/Meta model + visualization enabled)
+                                self.html_links = gr.HTML(
+                                    value="",
+                                    label="🌐 Visualization",
+                                    visible=False,
+                                )
                         else:
                             self.fbx_files = gr.State([])
+                            self.html_links = gr.State("")
+
+                    # State for tracking HTML files
+                    self.html_files_state = gr.State([])
 
                 # Right display area
                 with gr.Column(scale=3):
@@ -771,18 +962,19 @@ class T2MGradioUI:
                 gr.Markdown("### 🎭 FBX Model Template")
                 self.fbx_model_dropdown = gr.Dropdown(
                     choices=list(FBX_MODEL_OPTIONS.keys()),
-                    value="Lod1 Model",
+                    value="Wooden Model",
                     label="Select FBX Model",
                     info="Choose the character model for FBX export",
                 )
-                self.hf_neck_offset_checkbox = gr.Checkbox(
+                self.enable_visualization = gr.Checkbox(
                     value=False,
-                    label="High Fidelity Rig Proportions",
-                    info="Adjust neck position to match Meta Movement SDK high fidelity rig (fixes neck triangle issue in Unity)",
+                    label="Enable Visualization Generation",
+                    info="Generate HTML visualization for SMPLX and Meta Movement Avatar models",
+                    visible=False,  # Initially hidden, shown when SMPLX/Meta model selected
                 )
         else:
-            self.fbx_model_dropdown = gr.State("Lod1 Model")
-            self.hf_neck_offset_checkbox = gr.State(False)
+            self.fbx_model_dropdown = gr.State("Wooden Model")
+            self.enable_visualization = gr.State(False)
 
     def _bind_events(self):
         # Generate random seeds
@@ -815,6 +1007,9 @@ class T2MGradioUI:
             )
 
         # Generate motion logic
+        # Use a state to hold the raw fbx files before filtering
+        self.raw_fbx_files_state = gr.State([])
+
         self.generate_btn.click(
             fn=lambda: "Generating motion, please wait... (It takes some extra time to start the renderer for the first generation)",
             outputs=[self.status_output],
@@ -827,22 +1022,23 @@ class T2MGradioUI:
                 self.duration_slider,
                 self.cfg_slider,
                 self.fbx_model_dropdown,
-                self.hf_neck_offset_checkbox,
+                self.enable_visualization,
             ],
-            outputs=[self.output_display, self.fbx_files],
+            outputs=[self.output_display, self.raw_fbx_files_state, self.html_files_state],
             concurrency_limit=NUM_WORKERS,
         ).then(
-            fn=lambda fbx_list, fbx_model: (
-                (
-                    f"🎉 Motion generation completed! FBX files use '{fbx_model}' - ready for download."
-                    if fbx_list
-                    else "🎉 Motion generation completed! You can view the motion visualization result on the right"
-                ),
-                gr.update(visible=bool(fbx_list)),
-            ),
-            inputs=[self.fbx_files, self.fbx_model_dropdown],
-            outputs=[self.status_output, self.fbx_download_row],
+            fn=self._update_download_panel,
+            inputs=[self.raw_fbx_files_state, self.html_files_state, self.fbx_model_dropdown],
+            outputs=[self.status_output, self.fbx_download_row, self.html_links, self.fbx_files],
         )
+
+        # Show/hide visualization checkbox based on model selection
+        if getattr(self.runtime, "fbx_available", False):
+            self.fbx_model_dropdown.change(
+                fn=lambda model: gr.update(visible=model in MODELS_REQUIRING_CONVERSION),
+                inputs=[self.fbx_model_dropdown],
+                outputs=[self.enable_visualization],
+            )
 
         # Reset logic - different behavior based on rewrite availability
         if self.prompt_engineering_available:
