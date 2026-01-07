@@ -112,13 +112,14 @@ class T2MRuntime:
         else:
             print(f">>> T2MRuntime loaded in IP {self.local_ip}, devices={device_info}")
 
-    def set_fbx_converter(self, converter_type: str, template_path: Optional[str] = None):
+    def set_fbx_converter(self, converter_type: str, template_path: Optional[str] = None, neck_offset_cm: float = 0.0):
         """
         Set the FBX converter with a template.
 
         Args:
             converter_type: Converter type name (for logging)
             template_path: Path to the FBX template file
+            neck_offset_cm: Additional Y offset for Neck joint in cm (use 2.74 to match HF rig proportions)
         """
         if not self.fbx_available:
             print(">>> FBX module not available, cannot set converter")
@@ -132,11 +133,11 @@ class T2MRuntime:
             from .smplh2woodfbx import SMPLH2WoodFBX
 
             if template_path:
-                self.fbx_converter = SMPLH2WoodFBX(template_fbx_path=template_path)
+                self.fbx_converter = SMPLH2WoodFBX(template_fbx_path=template_path, neck_offset_cm=neck_offset_cm)
             else:
-                self.fbx_converter = SMPLH2WoodFBX()
+                self.fbx_converter = SMPLH2WoodFBX(neck_offset_cm=neck_offset_cm)
             self.current_fbx_converter_type = converter_type
-            print(f">>> Switched FBX converter to: {converter_type}")
+            print(f">>> Switched FBX converter to: {converter_type}, neck_offset_cm={neck_offset_cm}")
         except Exception as e:
             print(f">>> Failed to switch FBX converter: {e}")
 

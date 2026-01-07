@@ -147,6 +147,65 @@ SMPLH_TO_LOD1_MAPPING = {
     "R_Thumb2": "r_thumb2",
     "R_Thumb3": "r_thumb3",
 }
+
+# Mapping from SMPL-H joint names to High Fidelity rig joint names
+# This is used when exporting to Meta Movement SDK compatible rigs
+SMPLH_TO_HIGH_FIDELITY_MAPPING = {
+    "Pelvis": "Hips",
+    "L_Hip": "LeftLegUpper",
+    "R_Hip": "RightLegUpper",
+    "Spine1": "SpineLower",
+    "L_Knee": "LeftLegLower",
+    "R_Knee": "RightLegLower",
+    "Spine2": "SpineMiddle",
+    "L_Ankle": "LeftFootAnkle",
+    "R_Ankle": "RightFootAnkle",
+    "Spine3": "Chest",  # Note: HF has SpineUpper->Chest, we map Spine3 to Chest
+    "L_Foot": "LeftFootBall",
+    "R_Foot": "RightFootBall",
+    "Neck": "Neck",
+    "L_Collar": "LeftShoulder",
+    "R_Collar": "RightShoulder",
+    "Head": "Head",
+    "L_Shoulder": "LeftArmUpper",
+    "R_Shoulder": "RightArmUpper",
+    "L_Elbow": "LeftArmLower",
+    "R_Elbow": "RightArmLower",
+    "L_Wrist": "LeftHandWrist",
+    "R_Wrist": "RightHandWrist",
+    # Left hand fingers
+    "L_Index1": "LeftHandIndexProximal",
+    "L_Index2": "LeftHandIndexIntermediate",
+    "L_Index3": "LeftHandIndexDistal",
+    "L_Middle1": "LeftHandMiddleProximal",
+    "L_Middle2": "LeftHandMiddleIntermediate",
+    "L_Middle3": "LeftHandMiddleDistal",
+    "L_Pinky1": "LeftHandPinkyProximal",
+    "L_Pinky2": "LeftHandPinkyIntermediate",
+    "L_Pinky3": "LeftHandPinkyDistal",
+    "L_Ring1": "LeftHandRingProximal",
+    "L_Ring2": "LeftHandRingIntermediate",
+    "L_Ring3": "LeftHandRingDistal",
+    "L_Thumb1": "LeftHandThumbMeta",
+    "L_Thumb2": "LeftHandThumbProximal",
+    "L_Thumb3": "LeftHandThumbDistal",
+    # Right hand fingers
+    "R_Index1": "RightHandIndexProximal",
+    "R_Index2": "RightHandIndexIntermediate",
+    "R_Index3": "RightHandIndexDistal",
+    "R_Middle1": "RightHandMiddleProximal",
+    "R_Middle2": "RightHandMiddleIntermediate",
+    "R_Middle3": "RightHandMiddleDistal",
+    "R_Pinky1": "RightHandPinkyProximal",
+    "R_Pinky2": "RightHandPinkyIntermediate",
+    "R_Pinky3": "RightHandPinkyDistal",
+    "R_Ring1": "RightHandRingProximal",
+    "R_Ring2": "RightHandRingIntermediate",
+    "R_Ring3": "RightHandRingDistal",
+    "R_Thumb1": "RightHandThumbMeta",
+    "R_Thumb2": "RightHandThumbProximal",
+    "R_Thumb3": "RightHandThumbDistal",
+}
 # yapf: enable
 
 
@@ -427,6 +486,7 @@ def _convert_smplh_to_woodfbx(
     scale=100,
     smplh_to_fbx_mapping=None,
     clear_animations=True,
+    neck_offset_cm=0.0,
 ):
     """
     Convert SMPL-H parameters to FBX using a template FBX file.
@@ -442,6 +502,7 @@ def _convert_smplh_to_woodfbx(
         scale: Scale factor for translation (default 100 for m to cm conversion)
         smplh_to_fbx_mapping: Custom mapping from SMPL-H joint names to FBX node names
         clear_animations: Whether to clear existing animations in the template
+        neck_offset_cm: Additional Y offset for Neck joint in cm (use 2.74 to match HF rig proportions)
 
     Returns:
         bool: True if successful
@@ -500,6 +561,20 @@ def _convert_smplh_to_woodfbx(
     if clear_animations:
         _clearExistingAnimations(fbxScene)
 
+    # Apply neck offset if specified (to match HF rig proportions)
+    if neck_offset_cm != 0.0:
+        # Find the Neck node name in the FBX
+        neck_fbx_name = smplh_to_fbx_mapping.get("Neck")
+        if neck_fbx_name and neck_fbx_name in all_nodes:
+            neck_node = all_nodes[neck_fbx_name]
+            current_trans = neck_node.LclTranslation.Get()
+            new_y = current_trans[1] + neck_offset_cm
+            neck_node.LclTranslation.Set(fbx.FbxDouble3(current_trans[0], new_y, current_trans[2]))
+            print(f"[Neck Offset] Applied {neck_offset_cm}cm Y offset to '{neck_fbx_name}' "
+                  f"(Y: {current_trans[1]:.2f} -> {new_y:.2f}cm)")
+        else:
+            print(f"[Neck Offset] WARNING: Could not find Neck node to apply offset")
+
     # Apply animation to skeleton
     _applyAnimationToSkeleton(
         fbxScene=fbxScene,
@@ -544,6 +619,9 @@ def _auto_detect_mapping(all_nodes):
         # Try lod1 mapping
         elif SMPLH_TO_LOD1_MAPPING.get(smplh_name) in all_nodes:
             mapping[smplh_name] = SMPLH_TO_LOD1_MAPPING[smplh_name]
+        # Try high fidelity rig mapping
+        elif SMPLH_TO_HIGH_FIDELITY_MAPPING.get(smplh_name) in all_nodes:
+            mapping[smplh_name] = SMPLH_TO_HIGH_FIDELITY_MAPPING[smplh_name]
     return mapping
 
 
@@ -574,6 +652,7 @@ class SMPLH2WoodFBX:
         template_fbx_path: str = "./assets/wooden_models/boy_Rigging_smplx_tex.fbx",
         smplh_to_fbx_mapping: Optional[Dict[str, str]] = None,
         scale: float = 100,
+        neck_offset_cm: float = 0.0,
     ):
         """
         Initialize the converter.
@@ -582,11 +661,13 @@ class SMPLH2WoodFBX:
             template_fbx_path: Path to the template FBX file
             smplh_to_fbx_mapping: Custom mapping from SMPL-H joint names to FBX node names
             scale: Scale factor for translation (default 100 for m to cm conversion)
+            neck_offset_cm: Additional Y offset for Neck joint in cm (use 2.74 to match HF rig proportions)
         """
         print(f"[{self.__class__.__name__}] Template FBX: {template_fbx_path}")
         self.template_fbx_path = template_fbx_path
         self.smplh_to_fbx_mapping = smplh_to_fbx_mapping
         self.scale = scale
+        self.neck_offset_cm = neck_offset_cm
 
         # Analyze template FBX to detect joint names
         self._analyze_template()
@@ -627,6 +708,9 @@ class SMPLH2WoodFBX:
             # Try lod1.fbx mapping
             elif SMPLH_TO_LOD1_MAPPING.get(smplh_name) in self.all_template_nodes:
                 mapping[smplh_name] = SMPLH_TO_LOD1_MAPPING[smplh_name]
+            # Try high fidelity rig mapping
+            elif SMPLH_TO_HIGH_FIDELITY_MAPPING.get(smplh_name) in self.all_template_nodes:
+                mapping[smplh_name] = SMPLH_TO_HIGH_FIDELITY_MAPPING[smplh_name]
         return mapping
 
     def convert_npz_to_fbx(self, npz_file, outname, fps=30, clear_animations=True):
@@ -657,6 +741,7 @@ class SMPLH2WoodFBX:
             scale=self.scale,
             smplh_to_fbx_mapping=self.smplh_to_fbx_mapping,
             clear_animations=clear_animations,
+            neck_offset_cm=self.neck_offset_cm,
         )
 
     def convert_params_to_fbx(self, params, outname, clear_animations=True):
@@ -690,6 +775,7 @@ class SMPLH2WoodFBX:
             scale=self.scale,
             smplh_to_fbx_mapping=self.smplh_to_fbx_mapping,
             clear_animations=clear_animations,
+            neck_offset_cm=self.neck_offset_cm,
         )
 
 

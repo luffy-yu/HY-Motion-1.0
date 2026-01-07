@@ -55,6 +55,10 @@ FBX_MODEL_OPTIONS = {
     "Wooden Model": "./assets/wooden_models/boy_Rigging_smplx_tex.fbx",
 }
 
+# Neck offset in cm to match High Fidelity rig proportions
+# LOD1 Spine3-to-Neck = 9.36cm, HF Chest-to-Neck = 12.10cm, difference = 2.74cm
+HF_NECK_OFFSET_CM = 2.74
+
 # Global runtime instance for Zero GPU lazy loading
 _global_runtime = None
 _global_args = None
@@ -108,6 +112,7 @@ def generate_motion_on_gpu(
     original_text: str,
     output_dir: str,
     fbx_template_path: Optional[str] = None,
+    neck_offset_cm: float = 0.0,
 ) -> Tuple[str, List[str]]:
     """
     GPU-decorated function for motion generation.
@@ -118,10 +123,12 @@ def generate_motion_on_gpu(
     # Update FBX converter template if specified and different from current
     if fbx_template_path and runtime.fbx_available:
         global _global_fbx_template
-        if _global_fbx_template != fbx_template_path:
-            print(f">>> Switching FBX template to: {fbx_template_path}")
-            runtime.set_fbx_converter("custom", fbx_template_path)
-            _global_fbx_template = fbx_template_path
+        # Create a cache key that includes both template and neck offset
+        cache_key = f"{fbx_template_path}|neck={neck_offset_cm}"
+        if _global_fbx_template != cache_key:
+            print(f">>> Switching FBX template to: {fbx_template_path}, neck_offset_cm={neck_offset_cm}")
+            runtime.set_fbx_converter("custom", fbx_template_path, neck_offset_cm=neck_offset_cm)
+            _global_fbx_template = cache_key
 
     html_content, fbx_files, _ = runtime.generate_motion(
         text=text,
@@ -504,6 +511,7 @@ class T2MGradioUI:
         duration: float,
         cfg_scale: float,
         fbx_model_name: str = "Wooden Model",
+        hf_neck_offset: bool = False,
     ) -> Tuple[str, List[str]]:
         # When rewrite is not available, use original_text directly
         if not self.prompt_engineering_available:
@@ -524,6 +532,9 @@ class T2MGradioUI:
             # Get the FBX template path from the model name
             fbx_template_path = FBX_MODEL_OPTIONS.get(fbx_model_name, FBX_MODEL_OPTIONS["Lod1 Model"])
 
+            # Calculate neck offset based on checkbox
+            neck_offset_cm = HF_NECK_OFFSET_CM if hf_neck_offset else 0.0
+
             # Use GPU-decorated function for Zero GPU support
             html_content, fbx_files = generate_motion_on_gpu(
                 text=text_to_use,
@@ -534,6 +545,7 @@ class T2MGradioUI:
                 original_text=original_text,
                 output_dir=self.args.output_dir,
                 fbx_template_path=fbx_template_path,
+                neck_offset_cm=neck_offset_cm,
             )
             # Escape HTML content for srcdoc attribute
             escaped_html = html_content.replace('"', "&quot;")
@@ -763,8 +775,14 @@ class T2MGradioUI:
                     label="Select FBX Model",
                     info="Choose the character model for FBX export",
                 )
+                self.hf_neck_offset_checkbox = gr.Checkbox(
+                    value=False,
+                    label="High Fidelity Rig Proportions",
+                    info="Adjust neck position to match Meta Movement SDK high fidelity rig (fixes neck triangle issue in Unity)",
+                )
         else:
             self.fbx_model_dropdown = gr.State("Lod1 Model")
+            self.hf_neck_offset_checkbox = gr.State(False)
 
     def _bind_events(self):
         # Generate random seeds
@@ -809,6 +827,7 @@ class T2MGradioUI:
                 self.duration_slider,
                 self.cfg_slider,
                 self.fbx_model_dropdown,
+                self.hf_neck_offset_checkbox,
             ],
             outputs=[self.output_display, self.fbx_files],
             concurrency_limit=NUM_WORKERS,
