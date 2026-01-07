@@ -549,14 +549,28 @@ class T2MGradioUI:
                 neck_offset_cm=neck_offset_cm,
             )
 
-            # Track HTML visualization files
+            # Track HTML visualization files and converted FBX files
             html_files = []
+            final_fbx_files = fbx_files  # Default to original files
+
+            print(f">>> fbx_model_name: {fbx_model_name}")
+            print(f">>> MODELS_REQUIRING_CONVERSION: {MODELS_REQUIRING_CONVERSION}")
+            print(f">>> fbx_files count: {len(fbx_files) if fbx_files else 0}")
+            print(f">>> Needs conversion: {fbx_model_name in MODELS_REQUIRING_CONVERSION}")
 
             # If SMPLX or Meta Movement Avatar Model selected, run simple_convert.py
             if fbx_model_name in MODELS_REQUIRING_CONVERSION and fbx_files:
-                html_files = self._run_conversion_pipeline(
+                converted_fbx_files, html_files = self._run_conversion_pipeline(
                     fbx_files, fbx_model_name, enable_visualization
                 )
+                # Use converted FBX files if available, otherwise fall back to original
+                if converted_fbx_files:
+                    final_fbx_files = converted_fbx_files
+                    print(f">>> Using converted FBX files: {converted_fbx_files}")
+                else:
+                    print(f">>> No converted FBX files, using original: {fbx_files}")
+
+            print(f">>> Final FBX files to return: {final_fbx_files}")
 
             # Escape HTML content for srcdoc attribute
             escaped_html = html_content.replace('"', "&quot;")
@@ -569,7 +583,7 @@ class T2MGradioUI:
                     style="border: none; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);"
                 ></iframe>
             """
-            return iframe_html, fbx_files, html_files
+            return iframe_html, final_fbx_files, html_files
         except Exception as e:
             print(f"\t>>> Motion generation failed: {e}")
             return (
@@ -583,7 +597,7 @@ class T2MGradioUI:
         fbx_files: List[str],
         fbx_model_name: str,
         enable_visualization: bool,
-    ) -> List[str]:
+    ) -> Tuple[List[str], List[str]]:
         """
         Run simple_convert.py for SMPLX/Meta Movement Avatar models.
 
@@ -593,17 +607,20 @@ class T2MGradioUI:
             enable_visualization: Whether to generate HTML visualization
 
         Returns:
-            List of generated HTML visualization file paths
+            Tuple of (converted_fbx_files, html_visualization_files)
         """
         import subprocess
+        import glob
+        import shutil
 
+        converted_fbx_files = []
         html_files = []
-        
+
         # Determine the FBX template path based on model name
         if fbx_model_name == "SMPLX Model" or fbx_model_name == "Meta Movement Avatar Model":
             fbx_template = os.path.abspath(FBX_MODEL_OPTIONS.get(fbx_model_name))
         else:
-            return html_files
+            return converted_fbx_files, html_files
 
         # Path to simple_convert.py and pixi environment
         mhr_tools_dir = os.path.abspath("./MHR/tools/mhr_smpl_conversion")
@@ -612,12 +629,17 @@ class T2MGradioUI:
         pixi_python = os.path.abspath("./MHR/.pixi/envs/default/bin/python")
 
         for fbx_file in fbx_files:
+            print(f">>> Processing file: {fbx_file}")
+            print(f">>> File exists: {os.path.exists(fbx_file)}")
+
             # Skip non-FBX files
             if not fbx_file.endswith('.fbx'):
+                print(f">>> Skipping non-FBX file: {fbx_file}")
                 continue
 
             fbx_basename = os.path.splitext(os.path.basename(fbx_file))[0]
-            output_dir = os.path.join(os.path.dirname(fbx_file), f"converted_{fbx_basename}")
+            # Use absolute path for output directory to avoid issues with cwd
+            output_dir = os.path.abspath(os.path.join(os.path.dirname(fbx_file), f"converted_{fbx_basename}"))
 
             print(f">>> Running simple_convert.py for {fbx_file}")
             print(f">>> FBX template: {fbx_template}")
@@ -641,9 +663,36 @@ class T2MGradioUI:
                     timeout=300,  # 5 minute timeout
                 )
                 if result.returncode != 0:
-                    print(f">>> simple_convert.py failed: {result.stderr}")
+                    print(f">>> simple_convert.py failed with return code {result.returncode}")
+                    print(f">>> stderr: {result.stderr}")
+                    print(f">>> stdout: {result.stdout}")
                     continue
+                # Log any warnings from stderr (but don't fail on them)
+                if result.stderr:
+                    print(f">>> simple_convert.py warnings: {result.stderr}")
                 print(f">>> simple_convert.py output: {result.stdout}")
+
+                # Find the converted FBX file in output_dir
+                # simple_convert.py outputs files based on template name: lod1_animated.fbx or high_fidelity_rig_animated.fbx
+                template_basename = os.path.splitext(os.path.basename(fbx_template))[0]
+                expected_output_fbx = os.path.join(output_dir, f"{template_basename}_animated.fbx")
+
+                if os.path.exists(expected_output_fbx):
+                    # Rename to match input file basename for better clarity
+                    final_fbx_path = os.path.join(output_dir, f"{fbx_basename}_{template_basename}.fbx")
+                    shutil.copy2(expected_output_fbx, final_fbx_path)
+                    converted_fbx_files.append(final_fbx_path)
+                    print(f">>> Found converted FBX: {expected_output_fbx} -> {final_fbx_path}")
+                else:
+                    # Fallback: try glob pattern
+                    converted_fbx_pattern = os.path.join(output_dir, "*_animated.fbx")
+                    found_fbx = glob.glob(converted_fbx_pattern)
+                    if found_fbx:
+                        converted_fbx_files.extend(found_fbx)
+                        print(f">>> Found converted FBX (fallback): {found_fbx}")
+                    else:
+                        print(f">>> No converted FBX found in {output_dir}")
+
             except subprocess.TimeoutExpired:
                 print(f">>> simple_convert.py timed out for {fbx_file}")
                 continue
@@ -689,7 +738,7 @@ class T2MGradioUI:
                 except Exception as e:
                     print(f">>> visualize_output.py error: {e}")
 
-        return html_files
+        return converted_fbx_files, html_files
 
     def _update_download_panel(
         self,
