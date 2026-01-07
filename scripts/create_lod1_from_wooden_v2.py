@@ -438,7 +438,7 @@ def main():
 
     # Adjust upper body skeleton to match lod1 proportions
     # This fixes the mesh collapse issue when using MHR conversion
-    adjust_upper_body_to_lod1(wooden_armature, wooden_mesh)
+    # adjust_upper_body_to_lod1(wooden_armature, wooden_mesh)
 
     # Offset the model so feet are at ground level (Y=0)
     print("\n=== Applying ground offset ===")
