@@ -127,7 +127,9 @@ def _get_root_dir() -> str:
 
 
 def get_output_dir(sub_path: str = "") -> str:
-    output_base = _get_root_dir()
+    # Use current working directory as base to match where files are saved
+    # This ensures consistency when running from different directories
+    output_base = os.getcwd()
     if not os.path.exists(output_base):
         os.makedirs(output_base, exist_ok=True)
     if sub_path:

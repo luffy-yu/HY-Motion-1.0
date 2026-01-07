@@ -149,6 +149,16 @@ class T2MRuntime:
         with open(self.config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
 
+        # Resolve relative paths in config relative to the hymotion package root directory
+        # (parent of the directory containing this file)
+        hymotion_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if "train_pipeline_args" in config and "test_cfg" in config["train_pipeline_args"]:
+            test_cfg = config["train_pipeline_args"]["test_cfg"]
+            if "mean_std_dir" in test_cfg:
+                mean_std_path = test_cfg["mean_std_dir"]
+                if not os.path.isabs(mean_std_path):
+                    test_cfg["mean_std_dir"] = os.path.normpath(os.path.join(hymotion_root, mean_std_path))
+
         # Use allow_empty_ckpt=True when skip_model_loading is True
         allow_empty_ckpt = self.skip_model_loading
 
